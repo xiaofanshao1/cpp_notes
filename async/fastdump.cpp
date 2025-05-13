@@ -38,6 +38,8 @@ FastDump::FastDump(const FastDumpConfig& config) : config_(config) {
     io_thread_ = std::thread(&FastDump::io_thread_loop, this);
 }
 
+FastDump::FastDump() : FastDump(FastDumpConfig{}) {}
+
 FastDump::~FastDump() {
     stop_flag_ = true;
     cv_main_.notify_all();

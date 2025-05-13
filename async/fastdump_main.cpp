@@ -3,7 +3,7 @@
 #include <iostream>
 
 int main() {
-    FastDump fastdump("config.json");
+    FastDump fastdump;
 
     int width = 1920, height = 1080;
     std::thread main_thread([&fastdump, width, height] {

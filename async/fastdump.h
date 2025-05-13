@@ -35,6 +35,7 @@ struct FastDumpConfig {
 // FastDump主类
 class FastDump {
 public:
+    FastDump();
     FastDump(const FastDumpConfig& config);
     ~FastDump();
 
