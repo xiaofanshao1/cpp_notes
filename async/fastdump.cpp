@@ -73,7 +73,7 @@ void FastDump::scheduler_thread_loop() {
         {
             std::lock_guard<std::mutex> lock(io_mtx_);
             io_batch_.push_back(s);
-            if (io_batch_.size() >= batch_size_) {
+            if (io_batch_.size() >= config_.batch_size) {
                 io_cv_.notify_one();
             }
         }
@@ -90,15 +90,32 @@ void FastDump::scheduler_thread_loop() {
         }
         cv_main_.notify_one();
     }
+    // 收尾处理：清理 ready_queue_ 剩余 surface
+    while (true) {
+        Surface* s = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            if (ready_queue_.empty()) break;
+            s = ready_queue_.front();
+            ready_queue_.pop();
+        }
+        {
+            std::lock_guard<std::mutex> lock(io_mtx_);
+            io_batch_.push_back(s);
+        }
+    }
+    // 通知 IO 线程处理最后一批
+    io_cv_.notify_one();
 }
 
 void FastDump::io_thread_loop() {
-    while (!stop_flag_) {
+    while (true) {
         std::vector<Surface*> batch;
         {
             std::unique_lock<std::mutex> lock(io_mtx_);
-            io_cv_.wait(lock, [this] { return io_batch_.size() >= batch_size_ || stop_flag_; });
-            if (stop_flag_) break;
+            io_cv_.wait(lock, [this] { return io_batch_.size() >= config_.batch_size || stop_flag_; });
+            // 如果 stop_flag_ 并且 io_batch_ 为空，说明彻底结束
+            if (io_batch_.empty() && stop_flag_) break;
             batch.swap(io_batch_);
         }
         if (!batch.empty()) {
