@@ -3,7 +3,17 @@
 #include <iostream>
 #include <cstring>
 #include <chrono>
-#include <filesystem>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+// 仅支持 macOS/Linux 的目录创建函数
+static bool make_dir_if_not_exists(const std::string& dir) {
+    struct stat st;
+    if (stat(dir.c_str(), &st) != 0) {
+        return mkdir(dir.c_str(), 0755) == 0;
+    }
+    return true;
+}
 
 // ========== FastDump实现 ==========
 FastDump::FastDump(const FastDumpConfig& config) : config_(config) {
@@ -13,7 +23,7 @@ FastDump::FastDump(const FastDumpConfig& config) : config_(config) {
     }
     if (config_.io_type == "file") {
         io_func_ = [this](const std::vector<Surface*>& surfaces) {
-            std::filesystem::create_directories(config_.output_dir);
+            make_dir_if_not_exists(config_.output_dir);
             for (auto* s : surfaces) {
                 std::string fname = config_.output_dir + "/surface_" + std::to_string(s->id) + ".bin";
                 std::ofstream ofs(fname, std::ios::binary);
@@ -22,7 +32,7 @@ FastDump::FastDump(const FastDumpConfig& config) : config_(config) {
         };
     } else if (config_.io_type == "mmap") {
         io_func_ = [this](const std::vector<Surface*>& surfaces) {
-            std::filesystem::create_directories(config_.output_dir);
+            make_dir_if_not_exists(config_.output_dir);
             for (auto* s : surfaces) {
                 std::string fname = config_.output_dir + "/mmap_surface_" + std::to_string(s->id) + ".bin";
                 std::ofstream ofs(fname, std::ios::binary);
