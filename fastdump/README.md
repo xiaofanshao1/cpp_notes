@@ -12,7 +12,7 @@
 
 3. IO 速度一定是比 GPU surface copy 速度要慢的，服务好 IO ，让 IO 线程满载读写很重要。
 
-![plantuml-diagram-1747232450549](./assets/plantuml-diagram-1747232450549.svg)
+![plantuml-diagram-1747236434559](./assets/plantuml-diagram-1747236434559.png)
 
 ### 实现细节
 
