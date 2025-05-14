@@ -124,7 +124,7 @@ void FastDump::io_thread_loop() {
         }
     }
 }
-
+//TODO: 编程一个纯的异步 API，不需要 1ms 这个等待空余 surface 的时间目前仍然占据了主线程的部分
 void FastDump::dump(const Surface& src) {
     int idx = -1;
     {
