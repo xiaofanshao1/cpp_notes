@@ -49,26 +49,23 @@ FastDump::FastDump(const FastDumpConfig& config) : config_(config) {
 FastDump::FastDump() : FastDump(FastDumpConfig{}) {}
 
 FastDump::~FastDump() {
-    // 发送关闭事件
+    // 发送关闭事件并设置停止标志
     {
         std::lock_guard<std::mutex> lock(event_mtx_);
         event_queue_.push(Event(EventType::SHUTDOWN, nullptr));
+        stop_flag_ = true;
     }
+    
+    // 通知所有等待线程
     event_cv_.notify_one();
-    
-    // 设置停止标志
-    stop_flag_ = true;
-    
-    // 通知所有等待的线程
     cv_main_.notify_all();
-    event_cv_.notify_all();
     
-    // 等待线程结束
+    // 等待调度线程结束
     if (scheduler_thread_.joinable()) {
         scheduler_thread_.join();
     }
     
-    // 等待所有未完成的IO任务
+    // 等待所有进行中的任务完成（这是必要的，确保没有悬空的线程）
     std::lock_guard<std::mutex> lock(tasks_mtx_);
     for (auto& task : pending_io_tasks_) {
         if (task.second.valid()) {
@@ -86,43 +83,46 @@ std::future<void> FastDump::process_surface_async(Surface* surface) {
         // IO完成后，发送事件到事件队列
         {
             std::lock_guard<std::mutex> lock(event_mtx_);
-            event_queue_.push(Event(EventType::IO_COMPLETED, surface));
+            if (!stop_flag_) { // 只有在未停止时才发送事件
+                event_queue_.push(Event(EventType::IO_COMPLETED, surface));
+                event_cv_.notify_one();
+            }
         }
-        event_cv_.notify_one();
     });
     
     // 获取future
     std::future<void> future = task->get_future();
     
-    // 启动任务（使用async的线程池）
+    // 启动任务
     std::thread([task]() { (*task)(); }).detach();
     
     return future;
 }
 
 void FastDump::on_io_completed(Surface* surface) {
-    if (surface) {
-        // 标记surface为已写入
-        surface->is_written = true;
-        
-        // 移除任务记录
-        {
-            std::lock_guard<std::mutex> lock(tasks_mtx_);
-            pending_io_tasks_.erase(surface);
-        }
-        
-        // 回收surface到可用池
-        {
-            std::lock_guard<std::mutex> lock(pool_mtx_);
-            available_indices_.push_back(surface->id);
-        }
-        cv_main_.notify_one();
+    if (!surface) return;
+    
+    // 标记surface为已写入并回收
+    surface->is_written = true;
+    
+    // 移除任务记录
+    {
+        std::lock_guard<std::mutex> lock(tasks_mtx_);
+        pending_io_tasks_.erase(surface);
+    }
+    
+    // 回收surface到可用池
+    {
+        std::lock_guard<std::mutex> lock(pool_mtx_);
+        available_indices_.push_back(surface->id);
+        cv_main_.notify_one(); // 通知可能等待的dump线程
     }
 }
 
 void FastDump::scheduler_thread_loop() {
     while (!stop_flag_) {
         Event event;
+        bool has_event = false;
         
         // 等待事件
         {
@@ -131,11 +131,16 @@ void FastDump::scheduler_thread_loop() {
                 return !event_queue_.empty() || stop_flag_; 
             });
             
-            if (event_queue_.empty() && stop_flag_) break;
-            
-            event = event_queue_.front();
-            event_queue_.pop();
+            if (!event_queue_.empty()) {
+                event = event_queue_.front();
+                event_queue_.pop();
+                has_event = true;
+            } else if (stop_flag_) {
+                break;
+            }
         }
+        
+        if (!has_event) continue;
         
         // 处理事件
         switch (event.type) {
@@ -153,13 +158,14 @@ void FastDump::scheduler_thread_loop() {
                 break;
                 
             case EventType::SHUTDOWN:
-                // 退出循环
+                // 直接返回，结束线程
                 return;
         }
     }
 }
 
 void FastDump::dump(const Surface& src) {
+    // 获取可用surface
     int idx = -1;
     {
         std::unique_lock<std::mutex> lock(pool_mtx_);
@@ -174,6 +180,8 @@ void FastDump::dump(const Surface& src) {
         available_indices_.pop_back();
     }
     
+    if (idx < 0 || idx >= surfaces_.size()) return; // 安全检查
+    
     // 拷贝数据到池surface
     Surface* s = surfaces_[idx].get();
     s->data = src.data;
@@ -183,7 +191,13 @@ void FastDump::dump(const Surface& src) {
     // 加入事件队列并通知调度线程
     {
         std::lock_guard<std::mutex> lock(event_mtx_);
-        event_queue_.push(Event(EventType::NEW_SURFACE, s));
+        if (!stop_flag_) { // 只有在未停止时才发送事件
+            event_queue_.push(Event(EventType::NEW_SURFACE, s));
+            event_cv_.notify_one();
+        } else {
+            // 系统正在关闭，释放surface
+            std::lock_guard<std::mutex> pool_lock(pool_mtx_);
+            available_indices_.push_back(idx);
+        }
     }
-    event_cv_.notify_one();
 }
