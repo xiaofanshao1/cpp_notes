@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <unordered_map>
 
 // Surface结构体
 struct Surface {
@@ -29,7 +30,22 @@ struct FastDumpConfig {
     int surface_count = 50;
     int width = 1920;
     int height = 1080;
-    int batch_size = 8;
+};
+
+// 事件类型
+enum class EventType {
+    NEW_SURFACE,    // 新的Surface需要处理
+    IO_COMPLETED,   // IO操作完成
+    SHUTDOWN        // 系统关闭
+};
+
+// 事件结构体
+struct Event {
+    EventType type;
+    Surface* surface;
+    
+    Event() : type(EventType::SHUTDOWN), surface(nullptr) {}
+    Event(EventType t, Surface* s) : type(t), surface(s) {}
 };
 
 // FastDump主类
@@ -43,30 +59,29 @@ public:
 
 private:
     void scheduler_thread_loop();
-    void io_thread_loop();
+    std::future<void> process_surface_async(Surface* surface);
+    void on_io_completed(Surface* surface);
 
+    // 配置
     FastDumpConfig config_;
-    std::function<void(const std::vector<Surface*>&)> io_func_;
+    std::function<void(Surface*)> io_func_;
 
     // surface池
     std::vector<std::unique_ptr<Surface>> surfaces_;
     std::vector<int> available_indices_;
-    std::queue<Surface*> ready_queue_;
-
-    // 线程与同步
-    std::mutex mtx_;
+    std::mutex pool_mtx_;
     std::condition_variable cv_main_;
-    std::condition_variable cv_scheduler_;
 
-    // IO线程相关
-    std::mutex io_mtx_;
-    std::condition_variable io_cv_;
-    std::vector<Surface*> io_batch_;
-    std::promise<void> io_promise_;
-    std::future<void> io_future_;
+    // 事件系统
+    std::queue<Event> event_queue_;
+    std::mutex event_mtx_;
+    std::condition_variable event_cv_;
+    
+    // 进行中的IO任务跟踪
+    std::unordered_map<Surface*, std::future<void>> pending_io_tasks_;
+    std::mutex tasks_mtx_;
 
-    // 线程
+    // 线程控制
     std::thread scheduler_thread_;
-    std::thread io_thread_;
     std::atomic<bool> stop_flag_{false};
 };
