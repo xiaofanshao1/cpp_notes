@@ -266,11 +266,12 @@
 
 - 如何分配地址 64K对齐的显存块呢？
 
-  过量分配 -> 地址偏移->返回对齐后的指针->通过映射表记录原指针。下面 给出验证 `offset=(a-m)mod a`
+  过量分配 -> 地址偏移->返回对齐后的指针->通过映射表记录原指针。下面给出验证 `offset=(a-m)mod a`
 
   ![image-20250519171500532](./assets/image-20250519171500532.png)
 
   ```cpp
+  //-----------
   #include <cuda_runtime.h>
   void* alignedCudaMalloc(size_t size, size_t alignment) {
       void* basePtr;
@@ -295,13 +296,35 @@
   //调用 64K 对齐时，64*1024
   void* ptr = alignedCudaMalloc(1024, 65536); // 分配1KB内存，64KB对齐
   
-  // 对齐值为2的幂，可以快速求 mod，而判断是否为 2 的幂也有快速办法如下图
+  //-----------简化算法
+  //对齐值为2的幂，可以快速求 mod，而判断是否为 2 的幂也有快速办法如下图
   const bool is_power_of_two = (alignment & (alignment - 1)) == 0;
   当且仅当 alignment = 2^n 时，可以通过位与操作优化：
   address % alignment → address & (alignment-1)
+  
+  //这个是一个完全相等的转化 可以等价于 ceil(numeric_addr // alignment) * alignment
+    
+  constexpr uintptr_t alignment = 4096;
+  uintptr_t aligned_addr = (numeric_addr + alignment - 1) & ~(alignment - 1);
+  
+  //-----------建议使用uintptr_t类型进行推导
+    //在 cpp11 当中最好使用uintptr_t来进行地址计算会更安全
+  #include <cstdint>  // 必须包含的头文件
+  void* raw_ptr = malloc(1024);
+  // 将指针安全转化为整数（C++11+）
+  uintptr_t numeric_addr = reinterpret_cast<uintptr_t>(raw_ptr);
+  // 对齐计算（4096字节对齐）
+  constexpr uintptr_t alignment = 4096;
+  uintptr_t aligned_addr = (numeric_addr + alignment - 1) & ~(alignment - 1);
+  // 转换回指针
+  void* aligned_ptr = reinterpret_cast<void*>(aligned_addr);
   ```
-
+  
   ![image-20250519174807417](./assets/image-20250519174807417.png)
+  
+  
+
+​	
 
 ### 编译链接
 
