@@ -208,8 +208,7 @@ private:
             available_indices.push_back(s->id);
         }
         
-        // 通知主线程
-        cv_main.notify_one();
+        // 通知主线程 cv_main.notify_one();
     }
 };
 ```
