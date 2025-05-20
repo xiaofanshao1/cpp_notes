@@ -9,6 +9,24 @@
 
 ### 多线程
 
+- 可重入性是什么？
+
+  是为了避免对共享数据污染而设置的，意味着不是并发安全的。比如`glibc `当中 曾经`g_get_current_dir`为了性能使用静态缓冲区static，而两个线程执行 getcwd但是会被覆盖。之前原因如下，后来新暴露出安全实现接口
+
+  1. 节省每次调用时动态分配/释放内存的开销
+  2. 减少内存碎片化风险（针对短生命周期的小内存请求）
+
+  
+
+  比如下面例子,由于D3D11videocontex要求，其衍生的 Driver DDI 是不可重入的
+
+  - 当一个pipeline涉及几个HW engine 上下游同步造成latency 比较高时候，会采用async方式的方式来同时连续提交几个请求。比如 decode/copy/compute/encode，在此处 usage 当中 1. APP decode surface 设置结果在system mem 上，这会触发 decode 和 copy engine  2. 对 system surface做一些CPU 预处理处理后提交OpenCL kernel 做 compute  3. 对处理完的 surface再进行提交encode engine。这个时候throuput 的达到极限的标志是有一个 engine 饱和了，没有任何 bubble，而这个率先饱和的 engine 也是单个 packet 也是耗时最长的，决定了 throuput 到底是多少
+  - 没有任何 engine 饱和，一开始尝试提高了 Async depth 也就是在 pipeline 当中维护更多的 Async routine但没有作用。于是经过和载入符号表发现 GPUView 分析后，我们找到线程相关性，在bubble 处 worker 是有尝试提交 decode task 的， 但是每次尝调用DDI 时都在 driver 的一开始被挂起了。wake up 前后伴随着被另一帧decode task 的 copy后处理。也就是发生当发生上一帧的copy 时无法提交新一帧的decode 任务，这明显是不合理的。
+  - 发现这是D3D不可重入造成的，也就是继续调用 API 的时候，这个 copy  DDI 被实现为同步的，而只要 copy 没有结束就会继续持有 D3D UMD，导致下一帧 decode 被阻塞。
+  - 于是我们把 d3d->privatecopy 从同步 API 变成了异步的，在 worker 里面调用异步 API 后立即 waitsingleobj，让同步保持在 SDK 的worker 线程里，而不是 UMD 当中阻塞对D3D 不可重入 API的调用。
+
+  
+
 - CPP 当中如何实现多线程，如何创建一个线程?
 
   ```cpp
@@ -202,6 +220,24 @@
 
 ### 存储管理
 
+- C++的四种强制类型转换
+
+  
+
+- explicit关键字
+
+  
+
+- std::async的policy是使用的哪一种
+
+  两种一种是立即执行，另一种是get时候执行
+
+  `std::launch::async | std::launch::deferred`
+
+- 怎么避免两个类的循环引用问题
+
+​		
+
 - 移动构造使用场景是什么
 
   移动构造（Move Constructor）是 C++11 引入的重要特性，主要解决 **深拷贝性能问题**，核心场景是通过“窃取”临时对象资源来避免不必要的复制
@@ -218,19 +254,17 @@
 
       原对象会置空
 
-      
-
   - 注意
 
     - 对含有 **堆内存/文件句柄/网络连接** 的类必须实现移动构造
 
       ```cpp
-      std::unique_ptr<File> openFile() {
+    std::unique_ptr<File> openFile() {
           return std::unique_ptr<File>(new File("data.bin"));
       }
       auto file = openFile(); // 移动构造转移文件句柄所有权
       ```
-
+  
       
 
 - **指针和引用有什么区别呢**
