@@ -1,0 +1,110 @@
+1. 内存分配流程 (Activity Diagram)
+@startuml
+start
+:分配请求大小 **size**;
+:计算对齐后的 **2^n** 级别;
+repeat :查找当前层级空闲链表;
+    if (存在可用块?) then (yes)
+        :分配内存块;
+    else (no)
+        :向上查找更大内存块;
+        if (存在可分裂块?) then (yes)
+            :将块分裂为两个伙伴;
+            :将右伙伴加入下层链表;
+        else (no)
+            :分配失败;
+            stop;
+        endif
+    endif
+repeat while (找到合适块?) is (no)
+stop
+@enduml
+
+2. 伙伴系统合并流程 (Sequence Diagram)
+@startuml
+participant "释放块" as Block
+participant "伙伴系统" as Allocator
+participant "空闲链表" as FreeList
+
+Block -> Allocator : 释放内存请求
+Allocator -> Allocator : 计算伙伴地址
+alt 伙伴空闲且可合并
+    Allocator -> FreeList : 移除当前块和伙伴
+    Allocator -> Allocator : 合并生成父块
+    Allocator -> FreeList : 添加父块到上层
+else 无法合并
+    Allocator -> FreeList : 添加当前块到链表
+end
+@enduml
+
+3. 内存池结构图示 (Class Diagram)
+
+@startuml
+object 原始块 {
+  size = 3 (8KB)
+  status = free
+}
+
+object 分裂左块 {
+  size = 2 (4KB)
+  status = allocated
+}
+
+object 分裂右块 {
+  size = 2 (4KB)
+  status = free
+}
+
+原始块 --> 分裂左块 : 分裂为
+原始块 --> 分裂右块 : 伙伴
+@enduml
+3. 内存池结构图示 (Class Diagram)
+@startuml
+class MemoryPool {
+  - MAX_LEVEL : int
+  - min_size : int
+  - free_lists : List<LinkedList>
+  + malloc() : void*
+  + free() : void
+}
+
+class LinkedList {
+  - head : BlockHeader*
+  + add()
+  + remove()
+}
+
+class BlockHeader {
+  - size : int
+  - is_free : bool
+  - data_pointer() : void*
+}
+
+MemoryPool "1" *-- "1..n" LinkedList
+LinkedList "1" o-- "0..n" BlockHeader
+@enduml
+
+
+@startuml
+skinparam monochrome true
+skinparam Shadowing false
+
+title 伙伴系统内存分配时序
+
+actor User
+participant "API" as api
+participant "MemoryPool" as mp
+database "Free Lists" as fl
+
+User -> api: malloc(3KB)
+api -> mp: 对齐请求为4KB
+mp -> fl: 查找 level=2 (4KB)
+fl --> mp: 无可用块
+mp -> fl: 查找 level=3 (8KB)
+fl --> mp: 获得块#100
+mp -> mp: split_block(#100, 2)
+mp -> fl: 添加右伙伴#104到level=2
+fl -> mp: 确认操作
+mp --> api: 返回#100
+api --> User: 分配成功
+@enduml
