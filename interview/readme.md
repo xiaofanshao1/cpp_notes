@@ -222,9 +222,79 @@
 
 - C++的四种强制类型转换
 
-  
+  - `static_cast`
+
+    - 编译时检查
+    - 不会移除 const 限定符
+
+    ![image-20250521104023664](./assets/image-20250521104023664.png)
+
+  - `dynamic_cast`
+
+    类层次向下转型，需要依赖于虚函数表。与static_cast相反
+
+  - `reinterpret_cast`
+
+    一般用于IO，例如把IO文件转换成字节流
+
+    ```cpp
+    struct Surface {
+        std::vector<uint8_t> data;
+        int width;
+        int height;
+        int id;
+        bool is_ready = false;
+        bool is_written = false;
+        Surface(int w, int h, int i) : data(w * h), width(w), height(h), id(i) {}
+    };
+    std::ofstream ofs(fname, std::ios::binary);
+    ofs.write(reinterpret_cast<const char*>(s->data.data()), s->data.size());
+    ```
+
+  - `const_cast`
+
+    用来lagacy接口适配来使用
+
+    ![image-20250521102927330](./assets/image-20250521102927330.png)
 
 - explicit关键字
+
+  防止隐式类型转换，提醒类使用者仔细看构造函数，并显式调用，比如下面这个25.5 被隐式构造`TemperatureSensor(25.5)`
+
+  ![image-20250521110938865](./assets/image-20250521110938865.png)
+
+  ```cpp
+  class TemperatureSensor {
+  public:
+      // 摄氏度构造（危险：允许隐式转换） ❌
+      TemperatureSensor(double celsius) { /*...*/ } 
+      // 华氏度构造（特殊标记）✅
+      TemperatureSensor(double fahrenheit, bool isF) { /*...*/ }
+  };
+  void logTemperature(TemperatureSensor ts) { /*记录数据*/ }
+  int main() {
+      logTemperature(25.5);           // 隐含BUG：被当作摄氏度！
+      logTemperature(77.9, true);     // 正确调用华氏度构造
+  }
+  ```
+
+  而下面使用 explicit 后必须显示调用构造函数
+
+  ```cpp
+  class SafeTemperatureSensor {
+  public:
+      // 强制显式声明温度单位
+      explicit SafeTemperatureSensor(double celsius) { /*...*/ }
+      explicit SafeTemperatureSensor(double fahrenheit, bool isF) { /*...*/ }
+  };
+  void logTemperature(SafeTemperatureSensor ts) { /*...*/ }
+  int main() {
+      // logTemperature(25.5);                    // 编译错误！必须显式声明单位
+      
+      logTemperature(SafeTemperatureSensor(25.5));       // 明确摄氏度 ✅
+      logTemperature(SafeTemperatureSensor(77.9, true)); // 明确华氏度 ✅
+  }
+  ```
 
   
 
@@ -236,7 +306,26 @@
 
 - 怎么避免两个类的循环引用问题
 
-​		
+  比如学生和班级两个类，学生标记班级，班级有学生集合，就产生了循环引用。
+
+  可以采用前向声明
+
+  ```cpp
+  // Student.h
+  class Class; // 前置声明
+  class Student {
+    Class* currentClass; // 仅保留指针
+  };
+  // Class.h
+  class Student; // 前置声明
+  class Class {
+    vector<Student*> students;
+  };
+  ```
+
+  
+
+  
 
 - 移动构造使用场景是什么
 
@@ -259,7 +348,7 @@
     - 对含有 **堆内存/文件句柄/网络连接** 的类必须实现移动构造
 
       ```cpp
-    std::unique_ptr<File> openFile() {
+      std::unique_ptr<File> openFile() {
           return std::unique_ptr<File>(new File("data.bin"));
       }
       auto file = openFile(); // 移动构造转移文件句柄所有权
